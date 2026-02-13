@@ -14,7 +14,9 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
-    "express": "^4.21.0"
+    "express": "^4.21.0",
+    "react-markdown": "^10.1.0",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.1",
@@ -22,6 +24,7 @@
     "@tailwindcss/vite": "^4.0.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/express": "^5.0.0",
+    "@types/node": "^25.2.3",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",

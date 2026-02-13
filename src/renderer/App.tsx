@@ -10,7 +10,7 @@ type View = 'dashboard' | 'config'
 
 export default function App() {
   const [view, setView] = useState<View>('dashboard')
-  const { sessions, allSessions, filter, setFilter, totalCount } = useSessions()
+  const { sessions, allSessions, filter, setFilter, totalCount, closeSession, deleteSession } = useSessions()
 
   if (!window.agentBoard) {
     return (
@@ -23,9 +23,12 @@ export default function App() {
 
   const counts = {
     all: allSessions.length,
-    active: allSessions.filter(s => s.status === 'working' || s.status === 'needs_approval').length,
-    completed: allSessions.filter(s => s.status === 'done').length
+    // active: 需要排除已关闭的会话
+    active: allSessions.filter(s => (s.status === 'working' || s.status === 'needs_approval') && !s.isClosed).length,
+    // completed: 排除活跃中的会话（包括 idle、done、已关闭）
+    completed: allSessions.filter(s => (s.status !== 'working' && s.status !== 'needs_approval') || s.isClosed).length
   }
+  console.log('[App] Counts:', counts, 'Filter:', filter)
 
   return (
     <div className="flex h-screen bg-slate-900 text-slate-100">
@@ -52,7 +55,7 @@ export default function App() {
                   <p className="text-sm mt-1">Start a Claude Code session to see it here</p>
                 </div>
               ) : (
-                <SessionGrid sessions={sessions} />
+                <SessionGrid sessions={sessions} onCloseSession={closeSession} onDeleteSession={deleteSession} />
               )}
             </div>
           </>

@@ -1,13 +1,14 @@
 import React, { useState } from 'react'
-import type { MCPServerConfig, CLIType } from '../types'
+import type { MCPServerConfig, CLIType, CustomCLI } from '../types'
 
 interface MCPManagerProps {
   cliType: CLIType
+  customCLI?: CustomCLI
   servers: MCPServerConfig[]
   onUpdate: () => void
 }
 
-export default function MCPManager({ cliType, servers, onUpdate }: MCPManagerProps) {
+export default function MCPManager({ cliType, customCLI, servers, onUpdate }: MCPManagerProps) {
   const [editingServer, setEditingServer] = useState<MCPServerConfig | null>(null)
   const [isAdding, setIsAdding] = useState(false)
 
@@ -15,7 +16,7 @@ export default function MCPManager({ cliType, servers, onUpdate }: MCPManagerPro
     e.preventDefault()
     if (!editingServer) return
 
-    await window.agentBoard.saveMCPServer(cliType, editingServer)
+    await window.agentBoard.saveMCPServer(cliType, editingServer, customCLI?.id)
     setEditingServer(null)
     setIsAdding(false)
     onUpdate()
@@ -23,7 +24,7 @@ export default function MCPManager({ cliType, servers, onUpdate }: MCPManagerPro
 
   const handleDelete = async (name: string) => {
     if (confirm(`Are you sure you want to delete MCP server "${name}"?`)) {
-      await window.agentBoard.deleteMCPServer(cliType, name)
+      await window.agentBoard.deleteMCPServer(cliType, name, customCLI?.id)
       onUpdate()
     }
   }

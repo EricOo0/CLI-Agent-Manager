@@ -2,10 +2,14 @@ import { app, BrowserWindow, shell } from 'electron'
 import path from 'path'
 import { initDatabase, closeDatabase } from './database'
 import { startServer, stopServer } from './server'
-import { handleEvent, setSessionUpdateCallback, startCleanupTimer, startHeartbeatTimer, getSessions } from './session-manager'
+import { handleEvent, setSessionUpdateCallback, startCleanupTimer, startHeartbeatTimer, stopHeartbeatTimer, getSessions } from './session-manager'
 import { installHooks } from './hook-installer'
 import { registerIpcHandlers } from './ipc-handlers'
 import { createTray, updateTrayMenu, destroyTray } from './tray'
+import { loadNotificationSettings } from './notification-manager'
+import { loadNotificationSettings } from './notification-manager'
+import { loadNotificationSettings } from './notification-manager'
+import { loadNotificationSettings } from './notification-manager'
 
 let mainWindow: BrowserWindow | null = null
 let cleanupTimer: NodeJS.Timeout | null = null
@@ -86,6 +90,18 @@ app.whenReady().then(async () => {
   // 2. 初始化数据库
   initDatabase()
 
+  // 2.5 加载通知设置
+  loadNotificationSettings()
+
+  // 2.5 加载通知设置
+  loadNotificationSettings()
+
+  // 2.5 加载通知设置
+  loadNotificationSettings()
+
+  // 2.5 加载通知设置
+  loadNotificationSettings()
+
   // 3. 准备资源路径 (不自动安装 hook)
   const resourcesPath = getResourcesPath()
   // const hookResult = installHooks(resourcesPath)
@@ -139,6 +155,7 @@ app.whenReady().then(async () => {
 // 退出前清理
 app.on('before-quit', async () => {
   if (cleanupTimer) clearInterval(cleanupTimer)
+  stopHeartbeatTimer()
   await stopServer()
   closeDatabase()
   destroyTray()

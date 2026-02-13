@@ -1,6 +1,7 @@
 import { Tray, Menu, nativeImage, BrowserWindow } from 'electron'
 import path from 'path'
 import type { Session } from '../shared/types'
+import { getAllCustomCLIs } from './database'
 
 let tray: Tray | null = null
 
@@ -28,6 +29,22 @@ function getStatusLabel(status: Session['status']): string {
 }
 
 /**
+ * 获取自定义 CLI 名称映射
+ */
+function getCustomCLINameMap(): Map<string, string> {
+  const map = new Map<string, string>()
+  try {
+    const customCLIs = getAllCustomCLIs()
+    for (const cli of customCLIs) {
+      map.set(cli.id, cli.name)
+    }
+  } catch (e) {
+    console.error('加载自定义CLI名称失败:', e)
+  }
+  return map
+}
+
+/**
  * 构建托盘菜单（会话列表 + 底部按钮）
  */
 function buildTrayMenu(
@@ -38,16 +55,33 @@ function buildTrayMenu(
   const activeSessions = sessions.filter((s) => s.status === 'working' || s.status === 'needs_approval')
   const menuItems: Electron.MenuItemConstructorOptions[] = []
 
+  // 预加载自定义 CLI 名称映射
+  const customCLINames = getCustomCLINameMap()
+
   // 活跃会话列表（最多 10 个）
   const displaySessions = activeSessions.slice(0, 10)
   if (displaySessions.length > 0) {
     for (const session of displaySessions) {
       const statusLabel = getStatusLabel(session.status)
-      const cliName = session.cliType
+      // 确定显示名称：如果有 customCliId，查找自定义 CLI 名称；否则使用 cliType
+      let cliName: string
+      if (session.customCliId) {
+        // 使用自定义 CLI 的名称
+        const customName = customCLINames.get(session.customCliId)
+        cliName = customName || session.customCliId
+      } else if (session.cliType === 'other') {
+        // 兼容旧数据：尝试从 cliType 或其他方式识别
+        cliName = 'Other'
+      } else {
+        // 内置 CLI 类型，首字母大写
+        cliName = session.cliType.charAt(0).toUpperCase() + session.cliType.slice(1)
+      }
       const label = `${statusLabel} ${cliName}`
+      // 截断 session ID 显示：前8位...后4位
+      const shortSessionId = `${session.id.slice(0, 8)}...${session.id.slice(-4)}`
       menuItems.push({
         label,
-        sublabel: session.taskDescription?.slice(0, 50) || session.projectName || '',
+        sublabel: `[${shortSessionId}] ${session.taskDescription?.slice(0, 40) || session.projectName || ''}`,
         enabled: false
       })
     }

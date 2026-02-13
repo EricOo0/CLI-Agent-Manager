@@ -2,13 +2,17 @@ import React, { useState } from 'react'
 import type { Session } from '../types'
 import SessionCard from './SessionCard'
 import SessionDetailModal from './SessionDetailModal'
+import ChatDetailModal from './ChatDetailModal'
 
 interface SessionGridProps {
   sessions: Session[]
+  onCloseSession?: (sessionId: string) => void
+  onDeleteSession?: (sessionId: string) => void
 }
 
-export default function SessionGrid({ sessions }: SessionGridProps) {
+export default function SessionGrid({ sessions, onCloseSession, onDeleteSession }: SessionGridProps) {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
+  const [chatSession, setChatSession] = useState<Session | null>(null)
 
   if (sessions.length === 0) {
     return (
@@ -27,7 +31,13 @@ export default function SessionGrid({ sessions }: SessionGridProps) {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {sessions.map((session, i) => (
           <div key={session.id} onClick={() => setSelectedSession(session)} className="cursor-pointer">
-            <SessionCard session={session} index={i} />
+            <SessionCard
+              session={session}
+              index={i}
+              onClose={onCloseSession}
+              onDelete={onDeleteSession}
+              onViewChat={setChatSession}
+            />
           </div>
         ))}
       </div>
@@ -36,6 +46,13 @@ export default function SessionGrid({ sessions }: SessionGridProps) {
         <SessionDetailModal
           session={selectedSession}
           onClose={() => setSelectedSession(null)}
+        />
+      )}
+
+      {chatSession && (
+        <ChatDetailModal
+          session={chatSession}
+          onClose={() => setChatSession(null)}
         />
       )}
     </>

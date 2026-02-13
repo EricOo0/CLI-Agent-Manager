@@ -1,13 +1,14 @@
 import React, { useState } from 'react'
-import type { SkillDetail, CLIType } from '../types'
+import type { SkillDetail, CLIType, CustomCLI } from '../types'
 
 interface SkillManagerProps {
   cliType: CLIType
+  customCLI?: CustomCLI
   skills: SkillDetail[]
   onUpdate: () => void
 }
 
-export default function SkillManager({ cliType, skills, onUpdate }: SkillManagerProps) {
+export default function SkillManager({ cliType, customCLI, skills, onUpdate }: SkillManagerProps) {
   const [editingSkill, setEditingSkill] = useState<SkillDetail | null>(null)
   const [isAdding, setIsAdding] = useState(false)
 
@@ -15,7 +16,7 @@ export default function SkillManager({ cliType, skills, onUpdate }: SkillManager
     e.preventDefault()
     if (!editingSkill) return
 
-    await window.agentBoard.saveSkill(cliType, editingSkill)
+    await window.agentBoard.saveSkill(cliType, editingSkill, customCLI?.id)
     setEditingSkill(null)
     setIsAdding(false)
     onUpdate()
@@ -23,7 +24,7 @@ export default function SkillManager({ cliType, skills, onUpdate }: SkillManager
 
   const handleDelete = async (name: string) => {
     if (confirm(`Are you sure you want to delete skill "${name}"?`)) {
-      await window.agentBoard.deleteSkill(cliType, name)
+      await window.agentBoard.deleteSkill(cliType, name, customCLI?.id)
       onUpdate()
     }
   }

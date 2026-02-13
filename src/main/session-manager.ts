@@ -10,6 +10,8 @@ import {
   getEventsBySession
 } from './database'
 import { readTaskDescription } from './history-reader'
+import { isSubAgent, readSessionMessages } from './session-reader'
+import { sendNotification, loadNotificationSettings } from './notification-manager'
 import type { Session, SessionStatus, HookPayload } from '../shared/types'
 
 // 会话更新回调
@@ -22,7 +24,7 @@ export function setSessionUpdateCallback(cb: SessionUpdateCallback): void {
 }
 
 // 通知更新
-function notifyUpdate(): void {
+export function notifyUpdate(): void {
   if (onUpdate) {
     onUpdate(getAllSessions())
   }
@@ -62,18 +64,26 @@ export function handleEvent(payload: HookPayload): void {
   
   switch (hook_event_name) {
     case 'SessionStart': {
+      // 检测是否是子 agent（通过 isSidechain 字段）
+      const isSubAgentValue = isSubAgent(session_id, cwd)
+
+      // 尝试从 JSONL 中提取第一条 user 消息作为任务描述
+      const messages = readSessionMessages(session_id, cwd)
+      const firstUserMessage = messages.find(m => m.role === 'user')?.content || ''
+
       upsertSession({
         id: session_id,
         cliType: cli_type || 'claude-code',
+        customCliId: payload.custom_cli_id,
         project: cwd,
-        status: 'idle',
-        taskDescription: task_description || '',
+        status: isSubAgentValue ? 'working' : 'idle',
+        taskDescription: task_description || firstUserMessage || '',
         startTime: now,
-        taskStartTime: null,
-        isSubAgent: false,
+        taskStartTime: isSubAgentValue ? now : null,
+        isSubAgent: isSubAgentValue,
         lastEventTime: now
       })
-      
+
       // 插入事件
       insertEvent(session_id, hook_event_name, content)
 
@@ -96,15 +106,32 @@ export function handleEvent(payload: HookPayload): void {
     }
 
     case 'UserPromptSubmit': {
+      // 检查是否存在该会话
       const existing = getSessionById(session_id)
-      if (existing) {
+
+      if (existing && !existing.isClosed) {
+        // 会话已存在且未关闭，更新为 working 状态
         const desc = task_description || readTaskDescription(session_id) || existing.taskDescription
         updateSessionTask(session_id, desc, now, 'working')
       } else {
-        // 未见 SessionStart，创建新会话
+        // 新会话，检查是否需要关闭同项目的旧活跃会话
+        // 只有当新会话不是现有会话时才关闭旧会话
+        const activeSession = getAllSessions().find(s =>
+          s.project === cwd && !s.isClosed && s.id !== session_id && (s.status === 'working' || s.status === 'needs_approval')
+        )
+
+        // 如果有旧活跃 session（且不是当前会话），先关闭它
+        if (activeSession) {
+          updateSessionClosed(activeSession.id, true)
+          updateSessionStatus(activeSession.id, 'done')
+          insertEvent(activeSession.id, 'SessionAutoClosed', `新会话 ${session_id.slice(0, 8)}... 开始，自动关闭旧会话`)
+        }
+
+        // 创建新会话
         upsertSession({
           id: session_id,
           cliType: cli_type || 'claude-code',
+          customCliId: payload.custom_cli_id,
           project: cwd,
           status: 'working',
           taskDescription: task_description || '',
@@ -122,6 +149,11 @@ export function handleEvent(payload: HookPayload): void {
     case 'Stop': {
       updateSessionStatus(session_id, 'done')
       insertEvent(session_id, hook_event_name, content)
+      // 发送完成通知
+      const session = getSessionById(session_id)
+      if (session) {
+        sendNotification('complete', { id: session_id, taskDescription: session.taskDescription })
+      }
       break
     }
 
@@ -132,33 +164,51 @@ export function handleEvent(payload: HookPayload): void {
     }
 
     case 'Notification': {
+      const session = getSessionById(session_id)
+      if (!session) break
+
+      // 恢复为 working 状态（因为收到新 hook 说明会话仍在运行）
       if (payload.notification_type === 'permission_prompt') {
         updateSessionStatus(session_id, 'needs_approval')
+      } else {
+        // 其他通知（如 Mode 更新）恢复为 working
+        updateSessionStatus(session_id, 'working')
       }
-      // 确保 session 存在（针对意外情况）
-      const session = getSessionById(session_id)
-      if (session) {
-        insertEvent(session_id, hook_event_name, content)
-      }
+      insertEvent(session_id, hook_event_name, content)
       break
     }
 
     case 'PermissionRequest': {
+      console.log(`[SessionManager] PermissionRequest - session: ${session_id.slice(0,8)}..., set status to needs_approval`)
       updateSessionStatus(session_id, 'needs_approval')
       const session = getSessionById(session_id)
-      if (session) {
-        insertEvent(session_id, hook_event_name, content)
+      if (!session) {
+        console.log(`[SessionManager] PermissionRequest - session not found after status update`)
+        break
       }
+      insertEvent(session_id, hook_event_name, content)
+      // 发送通知
+      sendNotification('approval', { id: session_id, taskDescription: session.taskDescription })
+      console.log(`[SessionManager] PermissionRequest - done, notifying update`)
+      notifyUpdate()  // 通知前端更新
       break
     }
 
     default: {
-      // 未知事件，仅更新时间戳
+      // 未知事件，仅更新时间戳并恢复 working 状态
       const session = getSessionById(session_id)
       if (session) {
-        updateSessionStatus(session_id, session.status)
+        console.log(`[SessionManager] default case - session: ${session_id.slice(0,8)}..., current status: ${session.status}, isClosed: ${session.isClosed}`)
+
+        // 如果当前是待审批状态，收到后续事件说明审批已通过，恢复为运行中
+        const newStatus = session.status === 'needs_approval' ? 'working' : session.status
+        updateSessionStatus(session_id, newStatus)
         insertEvent(session_id, hook_event_name, content)
+
+        console.log(`[SessionManager] default case - updated status: ${session.status} -> ${newStatus}`)
       }
+      notifyUpdate()  // 通知前端更新
+      break
     }
   }
 
@@ -178,9 +228,10 @@ export function startCleanupTimer(): NodeJS.Timeout {
   }, 60 * 60 * 1000)
 }
 
-// 会话心跳超时时间（60秒无响应视为断开）
-const HEARTBEAT_TIMEOUT = 60 * 1000
-const HEARTBEAT_CHECK_INTERVAL = 30 * 1000
+// 会话心跳超时时间（3小时无响应视为断开）
+// 长时间任务（如代码分析、重构）可能需要几小时，设置较长的超时避免误判
+const HEARTBEAT_TIMEOUT = 3 * 60 * 60 * 1000  // 3小时
+const HEARTBEAT_CHECK_INTERVAL = 5 * 60 * 1000  // 每5分钟检查一次
 
 // 心跳检测定时器
 let heartbeatTimer: NodeJS.Timeout | null = null
@@ -205,6 +256,13 @@ export function stopHeartbeatTimer(): void {
     clearInterval(heartbeatTimer)
     heartbeatTimer = null
   }
+}
+
+// 导出一个函数用于在退出前最后一次检测
+export function finalizeHeartbeat(): void {
+  stopHeartbeatTimer()
+  // 最后一次检测，标记所有超时会话
+  checkStaleSessions()
 }
 
 // 检测超时会话

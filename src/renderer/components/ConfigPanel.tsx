@@ -1,18 +1,28 @@
 import React, { useState } from 'react'
-import type { CLIConfig } from '../types'
+import type { CLIConfig, CustomCLI } from '../types'
 import MCPManager from './MCPManager'
 import SkillManager from './SkillManager'
 
 interface ConfigPanelProps {
-  config: CLIConfig
+  config: CLIConfig & { customCLI?: CustomCLI }
   onUpdate: () => void
+  onCustomCLIDeleted?: () => void
 }
 
-export default function ConfigPanel({ config, onUpdate }: ConfigPanelProps) {
+export default function ConfigPanel({ config, onUpdate, onCustomCLIDeleted }: ConfigPanelProps) {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [activeTab, setActiveTab] = useState<'overview' | 'mcp' | 'skills'>('overview')
   const [editingPath, setEditingPath] = useState<{ type: 'config' | 'skills', value: string } | null>(null)
+
+  const isCustomCLI = !!config.customCLI
+  const hasConfigPath = isCustomCLI && (config.customCLI?.configPath || config.configPaths[0])
+  const hasSkillsPath = isCustomCLI && (config.customCLI?.skillsPath || config.configPaths[1])
+
+  // 自定义 CLI 只要有 configPath 就显示 MCP tab
+  const showMCPTab = !isCustomCLI || hasConfigPath
+  // 自定义 CLI 只要有 skillsPath 就显示 Skills tab
+  const showSkillsTab = !isCustomCLI || hasSkillsPath
 
   const handleOpenFile = (filePath: string) => {
     window.agentBoard.openConfigFile(filePath)
@@ -20,7 +30,7 @@ export default function ConfigPanel({ config, onUpdate }: ConfigPanelProps) {
 
   const handleSavePath = async () => {
     if (!editingPath) return
-    await window.agentBoard.setConfigPath(config.cliType, editingPath.type, editingPath.value)
+    await window.agentBoard.setConfigPath(config.cliType, editingPath.type, editingPath.value, config.customCLI?.id)
     setEditingPath(null)
     onUpdate()
   }
@@ -56,27 +66,165 @@ export default function ConfigPanel({ config, onUpdate }: ConfigPanelProps) {
         >
           Overview
         </button>
-        <button
-          onClick={() => setActiveTab('mcp')}
-          className={`pb-2 text-sm font-medium transition-colors ${
-            activeTab === 'mcp' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          MCP Servers
-        </button>
-        <button
-          onClick={() => setActiveTab('skills')}
-          className={`pb-2 text-sm font-medium transition-colors ${
-            activeTab === 'skills' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          Skills
-        </button>
+        {showMCPTab && (
+          <button
+            onClick={() => setActiveTab('mcp')}
+            className={`pb-2 text-sm font-medium transition-colors ${
+              activeTab === 'mcp' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            MCP Servers
+          </button>
+        )}
+        {showSkillsTab && (
+          <button
+            onClick={() => setActiveTab('skills')}
+            className={`pb-2 text-sm font-medium transition-colors ${
+              activeTab === 'skills' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Skills
+          </button>
+        )}
       </div>
 
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto">
-        {activeTab === 'overview' && (
+        {config.customCLI ? (
+          // 自定义 CLI 的视图 - 根据 activeTab 切换
+          activeTab === 'overview' ? (
+            <div className="flex flex-col gap-8">
+            <section className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+              <h3 className="text-sm font-semibold text-slate-200 mb-4">自定义 CLI 信息</h3>
+              <div className="flex flex-col gap-4">
+                <div>
+                  <label className="text-xs text-slate-400">名称</label>
+                  <p className="text-sm text-slate-200">{config.customCLI.name}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">图标</label>
+                  <p className="text-sm text-slate-200">{config.customCLI.icon || '○'}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">品牌色</label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-200 font-mono">{config.customCLI.color || '#6b7280'}</span>
+                    {config.customCLI.color && (
+                      <div
+                        className="w-4 h-4 rounded"
+                        style={{ backgroundColor: config.customCLI.color }}
+                      />
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400">创建时间</label>
+                  <p className="text-sm text-slate-200">{new Date(config.customCLI.createdAt).toLocaleString('zh-CN')}</p>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h3 className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-3">配置文件路径</h3>
+              <div className="flex flex-col gap-3">
+                {/* MCP 配置文件 */}
+                <div className="bg-slate-800 border border-slate-700 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-slate-300">MCP Config File</span>
+                    <button
+                      onClick={() => setEditingPath({ type: 'config', value: config.customCLI?.configPath || config.configPaths[0] || '' })}
+                      className="text-xs text-blue-400 hover:text-blue-300"
+                    >
+                      Change Path
+                    </button>
+                  </div>
+                  {editingPath?.type === 'config' ? (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={editingPath.value}
+                        onChange={e => setEditingPath({ ...editingPath, value: e.target.value })}
+                        className="flex-1 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-200 font-mono"
+                      />
+                      <button onClick={handleSavePath} className="px-2 py-1 bg-blue-600 rounded text-xs text-white">Save</button>
+                      <button onClick={() => setEditingPath(null)} className="px-2 py-1 text-xs text-slate-400">Cancel</button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <code className="text-xs text-slate-400 font-mono break-all">{config.customCLI?.configPath || config.configPaths[0] || 'Not configured'}</code>
+                      {(config.customCLI?.configPath || config.configPaths[0]) && (
+                        <button onClick={() => handleOpenFile(config.customCLI?.configPath || config.configPaths[0])} className="text-xs text-slate-500 hover:text-slate-300 ml-2">
+                          Open
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Skills 目录 */}
+                <div className="bg-slate-800 border border-slate-700 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-slate-300">Skills Directory</span>
+                    <button
+                      onClick={() => setEditingPath({ type: 'skills', value: config.customCLI?.skillsPath || config.configPaths[1] || '' })}
+                      className="text-xs text-blue-400 hover:text-blue-300"
+                    >
+                      Change Path
+                    </button>
+                  </div>
+                  {editingPath?.type === 'skills' ? (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={editingPath.value}
+                        onChange={e => setEditingPath({ ...editingPath, value: e.target.value })}
+                        className="flex-1 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-200 font-mono"
+                      />
+                      <button onClick={handleSavePath} className="px-2 py-1 bg-blue-600 rounded text-xs text-white">Save</button>
+                      <button onClick={() => setEditingPath(null)} className="px-2 py-1 text-xs text-slate-400">Cancel</button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <code className="text-xs text-slate-400 font-mono break-all">{config.customCLI?.skillsPath || config.configPaths[1] || 'Not configured'}</code>
+                      {(config.customCLI?.skillsPath || config.configPaths[1]) && (
+                        <button onClick={() => handleOpenFile(config.customCLI?.skillsPath || config.configPaths[1])} className="text-xs text-slate-500 hover:text-slate-300 ml-2">
+                          Open
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            <section className="bg-amber-500/10 rounded-lg p-4 border border-amber-500/20">
+              <h3 className="text-sm font-semibold text-amber-400 mb-2">注意事项</h3>
+              <p className="text-xs text-late-300">
+                自定义 CLI 需要手动配置 Hook 文件才能被 AgentBoard 监控。
+                请参考内置 CLI 的接入方式，将 Hook 文件放置在合适的目录中。
+              </p>
+            </section>
+
+            <section>
+              <button
+                onClick={async () => {
+                  if (confirm(`确定要删除自定义 CLI "${config.customCLI?.name}" 吗？`)) {
+                    const result = await window.agentBoard.deleteCustomCLI(config.customCLI!.id)
+                    if (result.success) {
+                      onCustomCLIDeleted?.()
+                    } else {
+                      alert('删除失败: ' + result.error)
+                    }
+                  }
+                }}
+                className="px-4 py-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 rounded text-sm font-medium"
+              >
+                删除此自定义 CLI
+              </button>
+            </section>
+          </div>
+          ) : null
+        ) : activeTab === 'overview' && (
           <div className="flex flex-col gap-8">
             {/* 接入管理 */}
             <section className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
@@ -210,18 +358,20 @@ export default function ConfigPanel({ config, onUpdate }: ConfigPanelProps) {
         )}
 
         {activeTab === 'mcp' && (
-          <MCPManager 
-            cliType={config.cliType} 
-            servers={config.mcpDetails || []} 
-            onUpdate={onUpdate} 
+          <MCPManager
+            cliType={config.cliType}
+            customCLI={config.customCLI}
+            servers={config.mcpDetails || []}
+            onUpdate={onUpdate}
           />
         )}
 
         {activeTab === 'skills' && (
-          <SkillManager 
-            cliType={config.cliType} 
-            skills={config.skillDetails || []} 
-            onUpdate={onUpdate} 
+          <SkillManager
+            cliType={config.cliType}
+            customCLI={config.customCLI}
+            skills={config.skillDetails || []}
+            onUpdate={onUpdate}
           />
         )}
       </div>
