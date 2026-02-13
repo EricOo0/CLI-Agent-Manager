@@ -165,41 +165,6 @@ export function getAgentId(sessionId: string, projectPath: string): string | nul
 }
 
 /**
- * 获取 parentUuid（父 session 的 UUID）
- * 用于识别父子 session 关系
- */
-export function getParentUuid(sessionId: string, projectPath: string): string | null {
-  const filePath = getSessionJsonlPath(sessionId, projectPath)
-
-  if (!fs.existsSync(filePath)) {
-    return null
-  }
-
-  try {
-    const content = fs.readFileSync(filePath, 'utf-8')
-    const lines = content.trim().split('\n')
-
-    for (const line of lines) {
-      if (!line.trim()) continue
-
-      try {
-        const entry: JSONLEntry & { parentUuid?: string } = JSON.parse(line)
-
-        if (entry.parentUuid) {
-          return entry.parentUuid
-        }
-      } catch {
-        // 跳过无法解析的行
-      }
-    }
-
-    return null
-  } catch {
-    return null
-  }
-}
-
-/**
  * 读取并解析 Session JSONL 文件
  * 返回 user 和 assistant 类型的消息列表
  */
