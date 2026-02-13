@@ -1,0 +1,115 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  /* 核心色板 - 深色 mission control */
+  --color-void: #0a0c10;
+  --color-hull: #111318;
+  --color-panel: #181b22;
+  --color-shelf: #1f2330;
+  --color-edge: #2a2f3d;
+  --color-muted: #4a5068;
+  --color-dim: #6b7394;
+  --color-text: #c8cee0;
+  --color-bright: #e8ecf4;
+
+  /* 状态色 */
+  --color-cyan: #22d3ee;
+  --color-cyan-dim: #0e7490;
+  --color-amber: #fbbf24;
+  --color-amber-dim: #92400e;
+  --color-green: #34d399;
+  --color-green-dim: #065f46;
+  --color-red: #f87171;
+  --color-slate-badge: #475569;
+
+  /* 发光效果 */
+  --color-glow-cyan: rgb(34 211 238 / 0.15);
+  --color-glow-amber: rgb(251 191 36 / 0.15);
+  --color-glow-green: rgb(52 211 153 / 0.1);
+
+  /* 字体 */
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-sans: 'Instrument Sans', system-ui, sans-serif;
+}
+
+/* 基础样式 */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background: var(--color-void);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* macOS 标题栏拖拽区 */
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-edge);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}
+
+/* 脉冲动画 - working 状态 */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* 弹跳动画 - needs_approval 状态 */
+@keyframes bounce-soft {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+.animate-bounce-soft {
+  animation: bounce-soft 1s ease-in-out infinite;
+}
+
+/* 扫描线背景纹理 */
+.scanlines::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgb(0 0 0 / 0.03) 2px,
+    rgb(0 0 0 / 0.03) 4px
+  );
+  pointer-events: none;
+}
+
+/* 卡片入场动画 */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-card-in {
+  animation: card-in 0.3s ease-out forwards;
+}

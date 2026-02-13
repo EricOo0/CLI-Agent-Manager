@@ -1,0 +1,9 @@
+node_modules/
+out/
+release/
+dist/
+.worktrees/
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
