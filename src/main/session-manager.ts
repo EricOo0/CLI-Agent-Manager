@@ -3,6 +3,7 @@ import {
   updateSessionStatus,
   updateSessionTask,
   updateSessionClosed,
+  reopenSession,
   getAllSessions,
   getSessionById,
   cleanOldSessions,
@@ -39,6 +40,13 @@ export function getSessionDetails(sessionId: string): Record<string, unknown>[] 
 export function handleEvent(payload: HookPayload): void {
   const now = Date.now()
   const { hook_event_name, session_id, cwd, cli_type, task_description } = payload
+
+  // 如果会话已关闭，且收到新事件，则恢复该会话（非 before_exit 事件）
+  const existing = getSessionById(session_id)
+  if (existing && existing.isClosed && hook_event_name !== 'before_exit') {
+    reopenSession(session_id)
+    console.log(`[SessionManager] Session ${session_id.slice(0, 8)}... 已重新打开`)
+  }
 
   // 1. 记录事件日志
   let content = ''

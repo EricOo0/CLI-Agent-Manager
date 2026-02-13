@@ -52,7 +52,7 @@ function buildTrayMenu(
   getWindow: () => BrowserWindow | null,
   onQuit: () => void
 ): Menu {
-  const activeSessions = sessions.filter((s) => s.status === 'working' || s.status === 'needs_approval')
+  const activeSessions = sessions.filter((s) => !s.isClosed && (s.status === 'working' || s.status === 'needs_approval'))
   const menuItems: Electron.MenuItemConstructorOptions[] = []
 
   // 预加载自定义 CLI 名称映射
@@ -171,7 +171,7 @@ export function updateTrayMenu(
   // 保存当前会话列表，供点击事件使用
   currentSessions = sessions
 
-  const activeSessions = sessions.filter((s) => s.status === 'working' || s.status === 'needs_approval')
+  const activeSessions = sessions.filter((s) => !s.isClosed && (s.status === 'working' || s.status === 'needs_approval'))
   const needsApproval = sessions.filter((s) => s.status === 'needs_approval')
 
   // 显示活跃数

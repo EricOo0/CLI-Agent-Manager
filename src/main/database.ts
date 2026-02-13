@@ -236,6 +236,17 @@ export function updateSessionClosed(id: string, isClosed: boolean): void {
   stmts.updateClosed.run({ id, isClosed: isClosed ? 1 : 0, lastEventTime: Date.now() })
 }
 
+// 恢复已关闭的会话（设置 isClosed=false）
+export function reopenSession(id: string): void {
+  const now = Date.now()
+  db.prepare(`
+    UPDATE sessions
+    SET is_closed = 0,
+        last_event_time = @lastEventTime
+    WHERE id = @id
+  `).run({ id, lastEventTime: now })
+}
+
 // 手动关闭会话（设置 isClosed=true 并将状态设为 done）
 export function closeSessionManually(id: string): void {
   const now = Date.now()
