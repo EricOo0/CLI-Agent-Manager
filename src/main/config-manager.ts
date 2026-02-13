@@ -76,10 +76,11 @@ const CLI_DEFINITIONS: CLIDefinition[] = [
     cliType: 'claude-code',
     name: 'Claude Code',
     defaultConfigPaths: [
-      path.join(HOME, '.claude', 'settings.json'),
+      path.join(HOME, '.claude.json'),
       path.join(HOME, '.claude', 'skills')
     ],
     detectPaths: [
+      path.join(HOME, '.claude.json'),
       path.join(HOME, '.claude', 'settings.json')
     ],
     supportedIntegration: true
@@ -122,65 +123,148 @@ const CLI_DEFINITIONS: CLIDefinition[] = [
 
 // Claude Code Adapter
 class ClaudeCodeAdapter implements ConfigAdapter {
-  private settingsPath: string
+  private configPath: string
   private skillsDir: string
 
   constructor(customPaths?: { config?: string, skills?: string }) {
-    this.settingsPath = customPaths?.config || path.join(HOME, '.claude', 'settings.json')
+    this.configPath = customPaths?.config || path.join(HOME, '.claude.json')
     this.skillsDir = customPaths?.skills || path.join(HOME, '.claude', 'skills')
   }
 
-  private readSettings(): any {
-    if (!fs.existsSync(this.settingsPath)) return {}
+  private readConfig(): any {
+    if (!fs.existsSync(this.configPath)) return {}
     try {
-      return JSON.parse(fs.readFileSync(this.settingsPath, 'utf-8'))
+      return JSON.parse(fs.readFileSync(this.configPath, 'utf-8'))
     } catch {
       return {}
     }
   }
 
-  private saveSettings(settings: any) {
-    fs.mkdirSync(path.dirname(this.settingsPath), { recursive: true })
-    fs.writeFileSync(this.settingsPath, JSON.stringify(settings, null, 2))
-  }
-
+  // Claude Code configuration is now primarily in ~/.claude.json which contains project-specific configs.
+  // We will read from all projects to display what's configured.
+  // We will NOT support saving to global config easily because it seems to be project-based.
+  // However, we can try to save to the "most relevant" project or just fail for now?
+  // Let's implement a "best effort" approach: Read from all projects.
+  
   readMCPs(): MCPServerConfig[] {
-    const settings = this.readSettings()
+    const config = this.readConfig()
     const servers: MCPServerConfig[] = []
     
-    if (settings.mcpServers) {
-      for (const [name, config] of Object.entries(settings.mcpServers as Record<string, any>)) {
+    // Support legacy settings.json format if user manually points to it
+    if (config.mcpServers && !config.projects) {
+      for (const [name, cfg] of Object.entries(config.mcpServers as Record<string, any>)) {
         servers.push({
           name,
-          command: config.command,
-          args: config.args || [],
-          env: config.env || {}
+          command: cfg.command || (cfg.type === 'http' ? '(HTTP)' : ''),
+          args: cfg.args || (cfg.type === 'http' ? [cfg.url] : []),
+          env: cfg.env || {}
         })
       }
+      return servers
     }
+
+    // Support ~/.claude.json format with "projects" key
+    if (config.projects) {
+      for (const [projectPath, projectConfig] of Object.entries(config.projects as Record<string, any>)) {
+        if (projectConfig.mcpServers) {
+          for (const [name, cfg] of Object.entries(projectConfig.mcpServers as Record<string, any>)) {
+            // Create a unique name for display: "ProjectName::ServerName"
+            // Or just use the server name if it's unique? No, duplicates exist.
+            // Let's use "[Project] Name"
+            const projectName = path.basename(projectPath)
+            const displayName = `[${projectName}] ${name}`
+            
+            servers.push({
+              name: displayName,
+              command: cfg.command || (cfg.type === 'http' ? '(HTTP)' : ''),
+              args: cfg.args || (cfg.type === 'http' ? [cfg.url] : []),
+              env: cfg.env || {}
+            })
+          }
+        }
+      }
+    }
+    
     return servers
   }
 
   saveMCP(mcp: MCPServerConfig): void {
-    const settings = this.readSettings()
-    if (!settings.mcpServers) settings.mcpServers = {}
-    
-    settings.mcpServers[mcp.name] = {
-      command: mcp.command,
-      args: mcp.args,
-      env: mcp.env
+    // Current UI doesn't allow selecting project. 
+    // We can only support saving if we know which project.
+    // Since we composite the name as "[Project] Name", we can try to parse it back.
+    const config = this.readConfig()
+    let targetProjectPath: string | null = null
+    let realName = mcp.name
+
+    const match = mcp.name.match(/^\[(.+)\]\s+(.+)$/)
+    if (match && config.projects) {
+      const projectName = match[1]
+      realName = match[2]
+      // Find project path by basename
+      targetProjectPath = Object.keys(config.projects).find(p => path.basename(p) === projectName) || null
     }
-    
-    this.saveSettings(settings)
+
+    if (targetProjectPath && config.projects && config.projects[targetProjectPath]) {
+      if (!config.projects[targetProjectPath].mcpServers) {
+        config.projects[targetProjectPath].mcpServers = {}
+      }
+      
+      const serverConfig: any = {
+        env: mcp.env
+      }
+
+      if (mcp.command === '(HTTP)') {
+        serverConfig.type = 'http'
+        serverConfig.url = mcp.args[0]
+      } else {
+        serverConfig.type = 'stdio'
+        serverConfig.command = mcp.command
+        serverConfig.args = mcp.args
+      }
+
+      config.projects[targetProjectPath].mcpServers[realName] = serverConfig
+      
+      // Save back to ~/.claude.json
+      fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2))
+    } else {
+      // Legacy or new global?
+      // If user is editing legacy settings.json
+      if (config.mcpServers || !config.projects) {
+         if (!config.mcpServers) config.mcpServers = {}
+         config.mcpServers[mcp.name] = {
+           command: mcp.command,
+           args: mcp.args,
+           env: mcp.env
+         }
+         fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2))
+      }
+    }
   }
 
   deleteMCP(name: string): void {
-    const settings = this.readSettings()
-    if (settings.mcpServers && settings.mcpServers[name]) {
-      delete settings.mcpServers[name]
-      this.saveSettings(settings)
+    const config = this.readConfig()
+    
+    // Parse "[Project] Name"
+    const match = name.match(/^\[(.+)\]\s+(.+)$/)
+    if (match && config.projects) {
+      const projectName = match[1]
+      const realName = match[2]
+      const targetProjectPath = Object.keys(config.projects).find(p => path.basename(p) === projectName)
+      
+      if (targetProjectPath && config.projects[targetProjectPath]?.mcpServers) {
+        delete config.projects[targetProjectPath].mcpServers[realName]
+        fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2))
+        return
+      }
+    }
+
+    // Legacy fallback
+    if (config.mcpServers && config.mcpServers[name]) {
+      delete config.mcpServers[name]
+      fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2))
     }
   }
+
 
   private getAllSkillFiles(dir: string): string[] {
     let results: string[] = []

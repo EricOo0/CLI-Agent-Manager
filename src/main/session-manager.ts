@@ -177,3 +177,59 @@ export function startCleanupTimer(): NodeJS.Timeout {
     notifyUpdate()
   }, 60 * 60 * 1000)
 }
+
+// 会话心跳超时时间（60秒无响应视为断开）
+const HEARTBEAT_TIMEOUT = 60 * 1000
+const HEARTBEAT_CHECK_INTERVAL = 30 * 1000
+
+// 心跳检测定时器
+let heartbeatTimer: NodeJS.Timeout | null = null
+
+// 启动心跳检测
+export function startHeartbeatTimer(): NodeJS.Timeout {
+  // 先停止已有的定时器
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer)
+  }
+
+  heartbeatTimer = setInterval(() => {
+    checkStaleSessions()
+  }, HEARTBEAT_CHECK_INTERVAL)
+
+  return heartbeatTimer
+}
+
+// 停止心跳检测
+export function stopHeartbeatTimer(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer)
+    heartbeatTimer = null
+  }
+}
+
+// 检测超时会话
+function checkStaleSessions(): void {
+  const now = Date.now()
+  const allSessions = getAllSessions()
+  let hasChanges = false
+
+  for (const session of allSessions) {
+    // 只检查活跃状态的工作会话
+    if (session.status !== 'working' && session.status !== 'needs_approval') {
+      continue
+    }
+
+    // 检查是否超时
+    const timeSinceLastEvent = now - session.lastEventTime
+    if (timeSinceLastEvent > HEARTBEAT_TIMEOUT) {
+      // 标记为断开连接/空闲状态
+      updateSessionStatus(session.id, 'idle')
+      insertEvent(session.id, 'HeartbeatTimeout', `会话超时，${Math.floor(timeSinceLastEvent / 1000)}秒无响应`)
+      hasChanges = true
+    }
+  }
+
+  if (hasChanges) {
+    notifyUpdate()
+  }
+}

@@ -104,9 +104,6 @@ export function initDatabase(): void {
     getById: db.prepare(`
       SELECT * FROM sessions WHERE id = @id
     `),
-    updateClosed: db.prepare(`
-      UPDATE sessions SET is_closed = @isClosed, last_event_time = @lastEventTime WHERE id = @id
-    `),
     deleteOld: db.prepare(`
       DELETE FROM sessions WHERE last_event_time < @cutoff AND is_closed = 1
     `)

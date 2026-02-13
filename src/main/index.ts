@@ -2,7 +2,7 @@ import { app, BrowserWindow, shell } from 'electron'
 import path from 'path'
 import { initDatabase, closeDatabase } from './database'
 import { startServer, stopServer } from './server'
-import { handleEvent, setSessionUpdateCallback, startCleanupTimer, getSessions } from './session-manager'
+import { handleEvent, setSessionUpdateCallback, startCleanupTimer, startHeartbeatTimer, getSessions } from './session-manager'
 import { installHooks } from './hook-installer'
 import { registerIpcHandlers } from './ipc-handlers'
 import { createTray, updateTrayMenu, destroyTray } from './tray'
@@ -124,8 +124,9 @@ app.whenReady().then(async () => {
   createTray(resourcesPath, getWindow, quit)
   updateTrayMenu(getSessions(), getWindow, quit)
 
-  // 9. 启动清理定时器
+  // 9. 启动清理定时器和心跳检测
   cleanupTimer = startCleanupTimer()
+  startHeartbeatTimer()
 
   // macOS: 点击 dock 图标显示窗口
   app.on('activate', () => {
