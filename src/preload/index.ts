@@ -42,6 +42,7 @@ const api = {
   closeSession: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.CLOSE_SESSION, sessionId),
   deleteSession: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.DELETE_SESSION, sessionId),
   getSessionMessages: (sessionId: string, projectPath: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_SESSION_MESSAGES, sessionId, projectPath) as Promise<ChatMessage[]>,
+  getSessionMessagesFromDb: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_SESSION_MESSAGES_FROM_DB, sessionId) as Promise<ChatMessage[]>,
 
   // 自定义 CLI 管理
   getCustomCLIs: () => ipcRenderer.invoke(IPC_CHANNELS.GET_CUSTOM_CLIS),

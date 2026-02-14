@@ -14,6 +14,10 @@ let stmts: {
   getAll: Database.Statement
   getById: Database.Statement
   deleteOld: Database.Statement
+  insertEvent: Database.Statement
+  getEventsBySession: Database.Statement
+  insertMessage: Database.Statement
+  getMessagesBySession: Database.Statement
 }
 
 // 初始化数据库
@@ -46,7 +50,9 @@ export function initDatabase(): void {
       start_time INTEGER NOT NULL,
       task_start_time INTEGER,
       is_sub_agent INTEGER NOT NULL DEFAULT 0,
-      last_event_time INTEGER NOT NULL
+      last_event_time INTEGER NOT NULL,
+      is_closed INTEGER NOT NULL DEFAULT 0,
+      term_session_id TEXT
     )
   `)
 
@@ -63,6 +69,23 @@ export function initDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id);
   `)
 
+  // 创建 messages 表（存储对话消息）
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      role TEXT NOT NULL,           -- 'user' 或 'assistant'
+      content TEXT NOT NULL,
+      model TEXT,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      timestamp INTEGER NOT NULL,
+      FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
+  `)
+
   // 创建 custom_clis 表（存储用户自定义CLI）
   db.exec(`
     CREATE TABLE IF NOT EXISTS custom_clis (
@@ -74,17 +97,25 @@ export function initDatabase(): void {
     )
   `)
 
-  // 迁移：添加 is_closed 列（兼容已有数据库）
+  // 获取 sessions 表结构信息（用于迁移检查）
   const tableInfo = db.prepare("PRAGMA table_info(sessions)").all() as Array<{name: string}>
-  const hasIsClosed = tableInfo.some(col => col.name === 'is_closed')
-  if (!hasIsClosed) {
-    db.exec(`ALTER TABLE sessions ADD COLUMN is_closed INTEGER NOT NULL DEFAULT 0`)
-  }
 
   // 迁移：添加 custom_cli_id 列（兼容已有数据库）
   const hasCustomCliId = tableInfo.some(col => col.name === 'custom_cli_id')
   if (!hasCustomCliId) {
     db.exec(`ALTER TABLE sessions ADD COLUMN custom_cli_id TEXT`)
+  }
+
+  // 迁移：添加 is_closed 列（兼容已有数据库）
+  const hasIsClosed = tableInfo.some(col => col.name === 'is_closed')
+  if (!hasIsClosed) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN is_closed INTEGER NOT NULL DEFAULT 0`)
+  }
+
+  // 迁移：添加 term_session_id 列（兼容已有数据库）
+  const hasTermSessionId = tableInfo.some(col => col.name === 'term_session_id')
+  if (!hasTermSessionId) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN term_session_id TEXT`)
   }
 
   // 迁移：添加 config_path 和 skills_path 列到 custom_clis 表
@@ -100,7 +131,6 @@ export function initDatabase(): void {
 
   // 准备 statements
   stmts = {
-    // ... (保留原有 stmts)
     insertEvent: db.prepare(`
       INSERT INTO events (session_id, type, content, timestamp)
       VALUES (@sessionId, @type, @content, @timestamp)
@@ -108,11 +138,17 @@ export function initDatabase(): void {
     getEventsBySession: db.prepare(`
       SELECT * FROM events WHERE session_id = @sessionId ORDER BY timestamp ASC
     `),
-    // ...
+    insertMessage: db.prepare(`
+      INSERT INTO messages (session_id, role, content, model, input_tokens, output_tokens, timestamp)
+      VALUES (@sessionId, @role, @content, @model, @inputTokens, @outputTokens, @timestamp)
+    `),
+    getMessagesBySession: db.prepare(`
+      SELECT * FROM messages WHERE session_id = @sessionId ORDER BY timestamp ASC
+    `),
 
     upsert: db.prepare(`
-      INSERT INTO sessions (id, cli_type, custom_cli_id, project, status, task_description, start_time, task_start_time, is_sub_agent, last_event_time)
-      VALUES (@id, @cliType, @customCliId, @project, @status, @taskDescription, @startTime, @taskStartTime, @isSubAgent, @lastEventTime)
+      INSERT INTO sessions (id, cli_type, custom_cli_id, project, status, task_description, start_time, task_start_time, is_sub_agent, last_event_time, is_closed, term_session_id)
+      VALUES (@id, @cliType, @customCliId, @project, @status, @taskDescription, @startTime, @taskStartTime, @isSubAgent, @lastEventTime, @isClosed, @termSessionId)
       ON CONFLICT(id) DO UPDATE SET
         cli_type = @cliType,
         custom_cli_id = @customCliId,
@@ -121,7 +157,9 @@ export function initDatabase(): void {
         task_description = CASE WHEN @taskDescription != '' THEN @taskDescription ELSE task_description END,
         task_start_time = @taskStartTime,
         is_sub_agent = @isSubAgent,
-        last_event_time = @lastEventTime
+        last_event_time = @lastEventTime,
+        is_closed = @isClosed,
+        term_session_id = @termSessionId
     `),
     updateStatus: db.prepare(`
       UPDATE sessions SET status = @status, last_event_time = @lastEventTime WHERE id = @id
@@ -163,7 +201,8 @@ function rowToSession(row: Record<string, unknown>): Session {
     taskStartTime: row.task_start_time as number | null,
     isSubAgent: Boolean(row.is_sub_agent),
     lastEventTime: row.last_event_time as number,
-    isClosed: Boolean(row.is_closed)
+    isClosed: Boolean(row.is_closed),
+    termSessionId: (row.term_session_id as string) || undefined
   }
 }
 
@@ -179,7 +218,9 @@ export function upsertSession(session: Omit<Session, 'projectName'>): void {
     startTime: session.startTime,
     taskStartTime: session.taskStartTime,
     isSubAgent: session.isSubAgent ? 1 : 0,
-    lastEventTime: session.lastEventTime
+    lastEventTime: session.lastEventTime,
+    isClosed: session.isClosed ? 1 : 0,
+    termSessionId: session.termSessionId || null
   })
 }
 
@@ -229,6 +270,39 @@ export function insertEvent(sessionId: string, type: string, content: string): v
 // 获取会话事件
 export function getEventsBySession(sessionId: string): Record<string, unknown>[] {
   return stmts.getEventsBySession.all({ sessionId }) as Record<string, unknown>[]
+}
+
+// 插入消息
+export function insertMessage(
+  sessionId: string,
+  role: string,
+  content: string,
+  model?: string,
+  inputTokens?: number,
+  outputTokens?: number
+): void {
+  stmts.insertMessage.run({
+    sessionId,
+    role,
+    content,
+    model: model || null,
+    inputTokens: inputTokens || null,
+    outputTokens: outputTokens || null,
+    timestamp: Date.now()
+  })
+}
+
+// 获取会话消息
+export function getMessagesBySession(sessionId: string): Array<{
+  id: number
+  role: string
+  content: string
+  model: string | null
+  input_tokens: number | null
+  output_tokens: number | null
+  timestamp: number
+}> {
+  return stmts.getMessagesBySession.all({ sessionId }) as any[]
 }
 
 // 更新会话关闭状态

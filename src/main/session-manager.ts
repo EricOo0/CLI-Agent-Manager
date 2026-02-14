@@ -8,7 +8,8 @@ import {
   getSessionById,
   cleanOldSessions,
   insertEvent,
-  getEventsBySession
+  getEventsBySession,
+  insertMessage
 } from './database'
 import { readTaskDescription } from './history-reader'
 import { isSubAgent, readSessionMessages } from './session-reader'
@@ -48,27 +49,27 @@ export function handleEvent(payload: HookPayload): void {
     console.log(`[SessionManager] Session ${session_id.slice(0, 8)}... 已重新打开`)
   }
 
-  // 1. 记录事件日志
+  // 构建事件内容 - 优先级：prompt > message > permission_mode:tool_name > task_description > notification_type
   let content = ''
-  if (task_description) {
+  if (payload.prompt) {
+    // UserPromptSubmit: 使用 prompt 字段
+    content = payload.prompt
+  } else if (payload.message) {
+    // Notification: 使用 message 字段
+    content = payload.message
+  } else if (payload.tool_name) {
+    // PermissionRequest: 显示工具名
+    content = `${payload.permission_mode || 'default'}: ${payload.tool_name}`
+  } else if (payload.permission_mode) {
+    // PermissionRequest: 显示模式
+    content = payload.permission_mode
+  } else if (task_description) {
+    // 兼容旧版本：使用 task_description
     content = task_description
   } else if (payload.notification_type) {
+    // Notification: 显示通知类型
     content = payload.notification_type
-  } else if (payload.permission_mode) {
-    content = `Mode: ${payload.permission_mode}`
   }
-  
-  // 确保存入 events 表
-  try {
-    // 如果是第一次收到该 session 的事件，可能需要先创建 session 记录（虽然 database.ts 有外键约束）
-    // 但 handleEvent 下面的 switch 逻辑会负责创建/更新 session。
-    // 为了满足外键约束，我们需要先执行 session 的 upsert 逻辑，再插入 event。
-    // 所以这里只是准备数据，或者调整执行顺序。
-  } catch (e) {
-    console.error('Error preparing event:', e)
-  }
-
-  // 调整顺序：先更新 Session 状态（确保 Session 存在），再插入 Event
   
   switch (hook_event_name) {
     case 'SessionStart': {
@@ -78,6 +79,24 @@ export function handleEvent(payload: HookPayload): void {
       // 尝试从 JSONL 中提取第一条 user 消息作为任务描述
       const messages = readSessionMessages(session_id, cwd)
       const firstUserMessage = messages.find(m => m.role === 'user')?.content || ''
+
+      // [新增] 如果提供了 term_session_id，关闭同一终端中的旧活跃 session
+      if (payload.term_session_id) {
+        const sameTerminalSessions = getAllSessions().filter(s =>
+          s.termSessionId === payload.term_session_id &&
+          !s.isClosed &&
+          s.id !== session_id &&
+          (s.status === 'working' || s.status === 'needs_approval' || s.status === 'idle')
+        )
+
+        for (const oldSession of sameTerminalSessions) {
+          updateSessionClosed(oldSession.id, true)
+          updateSessionStatus(oldSession.id, 'done')
+          insertEvent(oldSession.id, 'SessionAutoClosed',
+            `新会话 ${session_id.slice(0, 8)}... 在同一终端中开始，自动关闭旧会话`)
+          console.log(`[SessionManager] 同一终端旧 session ${oldSession.id.slice(0, 8)}... 已自动关闭`)
+        }
+      }
 
       upsertSession({
         id: session_id,
@@ -89,7 +108,8 @@ export function handleEvent(payload: HookPayload): void {
         startTime: now,
         taskStartTime: isSubAgentValue ? now : null,
         isSubAgent: isSubAgentValue,
-        lastEventTime: now
+        lastEventTime: now,
+        termSessionId: payload.term_session_id
       })
 
       // 插入事件
@@ -119,7 +139,8 @@ export function handleEvent(payload: HookPayload): void {
 
       if (existing && !existing.isClosed) {
         // 会话已存在且未关闭，更新为 working 状态
-        const desc = task_description || readTaskDescription(session_id) || existing.taskDescription
+        // 优先使用 hook 提供的 prompt，其次使用现有 task_description
+        let desc = payload.prompt || task_description || existing.taskDescription
         updateSessionTask(session_id, desc, now, 'working')
       } else {
         // 新会话，检查是否需要关闭同项目的旧活跃会话
@@ -135,20 +156,42 @@ export function handleEvent(payload: HookPayload): void {
           insertEvent(activeSession.id, 'SessionAutoClosed', `新会话 ${session_id.slice(0, 8)}... 开始，自动关闭旧会话`)
         }
 
-        // 创建新会话
+        // 创建新会话，使用 prompt 作为任务描述
+        const taskDesc = payload.prompt || task_description || ''
         upsertSession({
           id: session_id,
           cliType: cli_type || 'claude-code',
           customCliId: payload.custom_cli_id,
           project: cwd,
           status: 'working',
-          taskDescription: task_description || '',
+          taskDescription: taskDesc,
           startTime: now,
           taskStartTime: now,
           isSubAgent: false,
           lastEventTime: now
         })
+
+        // 如果 hook 没有提供 prompt 或 task_description，延迟从 transcript_path 读取
+        if (!payload.prompt && !task_description && payload.transcript_path) {
+          setTimeout(() => {
+            const messages = readSessionMessages(session_id, cwd)
+            const firstUserMessage = messages.find(m => m.role === 'user')?.content || ''
+            if (firstUserMessage) {
+              const session = getSessionById(session_id)
+              if (session && !session.taskDescription) {
+                updateSessionTask(session_id, firstUserMessage, now, 'working')
+                notifyUpdate()
+              }
+            }
+          }, 500)
+        }
       }
+
+      // 保存用户消息到 messages 表
+      if (payload.prompt) {
+        insertMessage(session_id, 'user', payload.prompt)
+      }
+
       // 插入事件
       insertEvent(session_id, hook_event_name, content)
       break

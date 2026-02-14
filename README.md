@@ -11,8 +11,8 @@ AgentBoard 是一个 macOS Electron 桌面应用，旨在为开发者提供一�
 ## ✨ 核心功能
 
 ### 1. 📊 会话看板 (Session Dashboard)
-- **实时状态监控**：一目了然地查看所有 Agent 的运行状态（`working`, `done`, `needs_approval`, `idle`）。
-- **时间线回溯**：点击会话卡片，通过模态窗口查看完整的对话历史、用户 Prompt 和 Agent 回复。
+- **实时状态监控**：一目了然地查看所有 Agent 的运行状态（`working`, `done`, `needs_approval`, `idle`），支持终端级会话管理。
+- **时间线回溯**：点击会话卡片，通过模态窗口查看完整的对话历史、用户 Prompt 和 Agent 回复，支持从本地 JSONL 文件和数据库双重读取。
 - **多维度筛选**：支持按状态（活跃/已完成）和 CLI 类型过滤会话。
 
 ### 2. 🔌 接入与配置管理 (Integration & Config)
@@ -92,6 +92,8 @@ npm run dist      # 打包 DMG (macOS)
   - **HTTP Server**: 接收 CLI Hook 的事件上报 (Express)
   - **Context Bridge**: 安全的 API 暴露
 - **设计模式**: Adapter Pattern (适配不同 CLI 的配置格式)
+- **会话状态机**: 基于事件驱动的状态管理 (`idle` → `working` → `needs_approval` → `done`)
+- **终端级会话管理**: 通过 `term_session_id` 识别同一终端中的会话，自动处理会话生命周期
 
 ## 📂 项目结构
 
@@ -110,6 +112,36 @@ agent-board/
 ├── resources/             # 静态资源与脚本
 │   ├── agent-board-hook.sh # 核心 Hook 脚本
 └── electron.vite.config.ts # 构建配置
+
+### 会话状态流转
+
+系统通过事件驱动的方式管理会话状态：
+
+```
+SessionStart
+    │
+    ├── 子 Agent ──→ working
+    │
+    └── 普通会话 ──→ idle ──UserPromptSubmit──→ working
+                                                  │
+                    ┌─────────────────────────────┘
+                    │
+            Notification(permission_prompt)
+                    │
+                    ▼
+            needs_approval ──用户响应/后续事件──→ working
+                    │
+                    ▼
+                Stop/before_exit
+                    │
+                    ▼
+                   done
+```
+
+**关键行为**：
+- 同一终端中启动新会话时，旧会话自动关闭
+- 心跳超时（3小时无响应）自动转为 `idle`
+- `needs_approval` 状态下收到任何后续事件自动恢复为 `working`
 ```
 
 ## 📝 常见问题
@@ -119,6 +151,9 @@ A: Claude Code 的 MCP 配置存储在 `~/.claude.json` (项目级) 或 `~/.clau
 
 **Q: 会话状态一直显示 `idle`？**
 A: 请确保您已经执行了 "一键接入"，并且终端中的 Claude Code 也是最新版本。部分旧版本可能不支持 hook 事件。
+
+**Q: 同一终端中启动了新的 Claude Code 会话，旧会话会怎样？**
+A: AgentBoard 支持终端级会话管理。当在同一终端中启动新会话时，系统会自动关闭该终端中的旧活跃会话（状态设为 `done` 并标记为已关闭），确保会话状态准确反映实际情况。
 
 ## 📄 许可证
 

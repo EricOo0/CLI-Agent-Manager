@@ -14,9 +14,8 @@ import {
   setCLIConfigPath
 } from './config-manager'
 import { isHookInstalled, installHooks, uninstallHooks } from './hook-installer'
-import { closeSessionManually, deleteSessionPermanently, getAllCustomCLIs, saveCustomCLI, deleteCustomCLI } from './database'
+import { closeSessionManually, deleteSessionPermanently, getAllCustomCLIs, saveCustomCLI, deleteCustomCLI, getMessagesBySession } from './database'
 import type { CustomCLI, NotificationSettings } from '../shared/types'
-import { getCustomCLIAdapter } from './config-manager'
 import {
   loadNotificationSettings,
   saveNotificationSettings,
@@ -206,5 +205,10 @@ export function registerIpcHandlers(resourcesPath: string): void {
   // 获取会话聊天消息
   ipcMain.handle(IPC_CHANNELS.GET_SESSION_MESSAGES, (_event, sessionId: string, projectPath: string) => {
     return readSessionMessages(sessionId, projectPath)
+  })
+
+  // 从数据库获取会话聊天消息
+  ipcMain.handle(IPC_CHANNELS.GET_SESSION_MESSAGES_FROM_DB, (_event, sessionId: string) => {
+    return getMessagesBySession(sessionId)
   })
 }

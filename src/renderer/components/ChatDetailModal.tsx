@@ -18,7 +18,7 @@ export default function ChatDetailModal({ session, onClose }: ChatDetailModalPro
     if (showRefresh) setRefreshing(true)
     setError(null)
     try {
-      const data = await window.agentBoard.getSessionMessages(session.id, session.project)
+      const data = await window.agentBoard.getSessionMessagesFromDb(session.id)
       setMessages(data)
     } catch (err) {
       console.error('加载聊天消息失败:', err)
@@ -31,7 +31,7 @@ export default function ChatDetailModal({ session, onClose }: ChatDetailModalPro
 
   useEffect(() => {
     loadMessages()
-  }, [session.id, session.project])
+  }, [session.id])
 
   // 格式化 Token 数量
   const formatTokens = (tokens: number): string => {

@@ -29,6 +29,7 @@ export interface Session {
   isSubAgent: boolean
   lastEventTime: number
   isClosed?: boolean        // CLI 进程是否已关闭
+  termSessionId?: string    // 终端会话 ID，用于识别同一终端中的 session
 }
 
 // Hook 事件 payload（从 stdin JSON 接收）
@@ -41,6 +42,14 @@ export interface HookPayload {
   notification_type?: string
   permission_mode?: string
   task_description?: string // skill 上报时可直接带
+  prompt?: string           // UserPromptSubmit 的用户输入
+  message?: string          // Notification 的消息
+  tool_name?: string        // PermissionRequest 的工具名
+  tool_input?: unknown      // PermissionRequest 的工具输入
+  source?: string           // SessionStart 的来源
+  model?: string            // SessionStart 的模型
+  transcript_path?: string  // 会话 JSONL 文件路径
+  term_session_id?: string  // 终端会话 ID，用于识别同一终端中的 session
 }
 
 // MCP Server 配置
@@ -129,6 +138,7 @@ export const IPC_CHANNELS = {
   CLOSE_SESSION: 'session:close',
   DELETE_SESSION: 'session:delete',
   GET_SESSION_MESSAGES: 'session:messages',
+  GET_SESSION_MESSAGES_FROM_DB: 'session:messages-db',
 
   // 自定义 CLI 管理
   GET_CUSTOM_CLIS: 'custom-clis:get',
